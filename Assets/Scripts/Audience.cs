@@ -95,6 +95,46 @@ struct Audience
         return math.mul(math.mul(math.mul(xform, m1), m2), m3);
     }
 
+    public float4x4 GetStickMatrixWithPhase
+    (float2 pos, float4x4 xform, float time, float phaseArg, uint seed)
+    {
+              var rand = new Random(seed);
+        rand.NextUInt4();
+
+        // Cyclic animation phase parameter
+        var phase = phaseArg * math.PI;
+         
+        var nr1 = rand.NextFloat(-1000, 1000);
+        phase += noise.snoise(math.float2(nr1, time * 0.27f));
+
+        // Animation origin (shoulder position)
+        var origin = float3.zero;
+        origin.xz = pos + rand.NextFloat2(-0.3f, 0.3f) * seatPitch;
+        origin.y = rand.NextFloat(-0.2f, 0.2f);
+
+        // Swing angle
+        var angle = math.cos(phase);
+        var angle_unsmooth = math.smoothstep(-1, 1, angle) * 2 - 1;
+        angle = math.lerp(angle, angle_unsmooth, rand.NextFloat());
+        angle *= rand.NextFloat(0.3f, 1.0f);
+
+        // Swing axis
+        var nr2 = rand.NextFloat(-1000, 1000);
+        var dx = noise.snoise(math.float2(nr2, time * 0.23f + 100));
+        var axis = math.normalize(math.float3(dx, 0, 1));
+
+        // Stick offset (arm length)
+        var offset = swingOffset * rand.NextFloat(0.75f, 1.25f);
+
+        // Matrix composition
+        var m1 = float4x4.Translate(origin);
+        var m2 = float4x4.AxisAngle(axis, angle);
+        var m3 = float4x4.Translate(math.float3(0, offset, 0));
+        return math.mul(math.mul(math.mul(xform, m1), m2), m3);
+    }
+
+
+
     public Color GetStickColor(float2 pos, float time, uint seed)
     {
         var rand = new Random(seed);
@@ -134,4 +174,27 @@ struct AudienceAnimationJob : IJobParallelFor
         matrices[i] = config.GetStickMatrix(pos, xform, time, seed++);
         colors[i] = config.GetStickColor(pos, time, seed++);
     }
+}
+
+[BurstCompile]
+struct AudienceAnimationJobWithPhase : IJobParallelFor
+{
+  public Audience config;
+  public Matrix4x4 xform;
+  public float time;
+  public float phase;
+
+  public NativeSlice<Matrix4x4> matrices;
+  public NativeSlice<Color> colors;
+
+  public void Execute(int i){
+    var (block, seat) = config.GetCoordinatesFromIndex(i);
+        var pos = config.GetPositionOnPlane(block, seat);
+        var seed = (uint)i * 2u + 123u;
+        matrices[i] = config.GetStickMatrixWithPhase(pos, xform, time, phase, seed++);
+        //matrices[i] = config.GetStickMatrix(pos, xform, time, seed++);
+        colors[i] = config.GetStickColor(pos, time, seed++);
+    
+  }
+  
 }
